@@ -44,6 +44,12 @@ extension Config {
         static let `default` = true
         public static let key: String = "dev.ensan.inputmethod.azooKeyMac.preference.enableLiveConversion"
     }
+    /// 入力中の候補に品詞などの言語情報を表示する設定
+    public struct CandidateLinguisticAnalysis: BoolConfigItem {
+        public init() {}
+        static let `default` = false
+        public static let key: String = "dev.ensan.inputmethod.azooKeyMac.preference.candidateLinguisticAnalysis"
+    }
     /// 円マークの代わりにバックスラッシュを入力する設定
     public struct TypeBackSlash: BoolConfigItem {
         public init() {}

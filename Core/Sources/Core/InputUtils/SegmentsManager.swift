@@ -26,6 +26,9 @@ public final class SegmentsManager {
 
     public weak var delegate: (any SegmentManagerDelegate)?
     private var kanaKanjiConverter: KanaKanjiConverter
+    private lazy var standardKanaKanjiConverter = KanaKanjiConverter.withDefaultDictionary()
+    private var standardCandidateResult: ConversionResult?
+    private var isStandardConverterComposing = false
     private let applicationDirectoryURL: URL
     private let containerURL: URL?
     private let context: Context
@@ -80,13 +83,41 @@ public final class SegmentsManager {
         candidate.data.map(\.ruby).joined()
     }
 
+    private var canCompareZenzaiCandidates: Bool {
+        guard self.context.useZenzai else {
+            return false
+        }
+        let modelURL = Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/ggml-model-Q5_K_M.gguf")
+        return FileManager.default.fileExists(atPath: modelURL.path)
+    }
+
     public func makeCandidatePresentations(_ candidates: [Candidate]) -> [CandidatePresentation] {
         let additionalPresentations = self.additionalCandidatePresentationsForSelectionIndex
         return candidates.indices.map { index in
             if index < additionalPresentations.count {
                 return .init(candidate: candidates[index], displayContext: additionalPresentations[index].displayContext)
             }
-            return .init(candidate: candidates[index])
+            guard index == 0,
+                  let standardResult = self.standardCandidateResult,
+                  let zenzaiResult = self.rawCandidates,
+                  (zenzaiResult.mainResults.first?.text == candidates[index].text ||
+                   zenzaiResult.firstClauseResults.first?.text == candidates[index].text) else {
+                return .init(candidate: candidates[index])
+            }
+            let standardCandidate = standardResult.firstClauseResults.first?.composingCount == candidates[index].composingCount
+                ? standardResult.firstClauseResults.first
+                : standardResult.mainResults.first
+            guard let standardCandidate else {
+                return .init(candidate: candidates[index])
+            }
+            let adjustedIndices = CandidateTreeAnalysis.zenzaiAdjustedElementIndices(
+                candidate: candidates[index],
+                standardCandidate: standardCandidate
+            )
+            return .init(
+                candidate: candidates[index],
+                displayContext: .init(zenzaiAdjustedElementIndices: adjustedIndices)
+            )
         }
     }
 
@@ -174,7 +205,8 @@ public final class SegmentsManager {
         leftSideContext: String?,
         requestRichCandidates: Bool,
         requireJapanesePrediction: ConvertRequestOptions.PredictionMode,
-        requireEnglishPrediction: ConvertRequestOptions.PredictionMode
+        requireEnglishPrediction: ConvertRequestOptions.PredictionMode,
+        useZenzai: Bool = true
     ) -> ConvertRequestOptions {
         let canUseDebugTypoCorrection = Config.DebugTypoCorrection().value && self.hasDebugTypoCorrectionWeights()
         return .init(
@@ -188,8 +220,8 @@ public final class SegmentsManager {
             sharedContainerURL: self.azooKeyMemoryDir,
             textReplacer: .withDefaultEmojiDictionary(),
             specialCandidateProviders: KanaKanjiConverter.defaultSpecialCandidateProviders,
-            zenzaiMode: self.zenzaiMode(leftSideContext: leftSideContext, requestRichCandidates: requestRichCandidates),
-            experimentalZenzaiPredictiveInput: true,
+            zenzaiMode: useZenzai ? self.zenzaiMode(leftSideContext: leftSideContext, requestRichCandidates: requestRichCandidates) : .off,
+            experimentalZenzaiPredictiveInput: useZenzai,
             typoCorrectionMode: .automatic,
             metadata: self.metadata
         )
@@ -216,12 +248,22 @@ public final class SegmentsManager {
         self.backspaceTypoCorrectionLock = nil
         self.lastInputStyle = .direct
         self.zenzaiPersonalizationMode = self.getZenzaiPersonalizationMode()
+        if self.isStandardConverterComposing {
+            self.standardKanaKanjiConverter.stopComposition()
+            self.isStandardConverterComposing = false
+        }
+        self.standardCandidateResult = nil
     }
 
     @MainActor
     public func deactivate() {
         self.kanaKanjiConverter.stopComposition()
         self.kanaKanjiConverter.commitUpdateLearningData()
+        if self.isStandardConverterComposing {
+            self.standardKanaKanjiConverter.stopComposition()
+            self.isStandardConverterComposing = false
+        }
+        self.standardCandidateResult = nil
         self.rawCandidates = nil
         self.didExperienceSegmentEdition = false
         self.lastOperation = .other
@@ -239,6 +281,11 @@ public final class SegmentsManager {
     public func stopComposition() {
         self.composingText.stopComposition()
         self.kanaKanjiConverter.stopComposition()
+        if self.isStandardConverterComposing {
+            self.standardKanaKanjiConverter.stopComposition()
+            self.isStandardConverterComposing = false
+        }
+        self.standardCandidateResult = nil
         self.rawCandidates = nil
         self.didExperienceSegmentEdition = false
         self.lastOperation = .other
@@ -257,6 +304,11 @@ public final class SegmentsManager {
         self.didExperienceSegmentEdition = false
         self.lastOperation = .other
         self.kanaKanjiConverter.commitUpdateLearningData()
+        if self.isStandardConverterComposing {
+            self.standardKanaKanjiConverter.stopComposition()
+            self.isStandardConverterComposing = false
+        }
+        self.standardCandidateResult = nil
         self.shouldShowCandidateWindow = false
         self.selectionIndex = nil
         self.resetAdditionalCandidates()
@@ -384,6 +436,9 @@ public final class SegmentsManager {
     public func forgetMemory() {
         if let selectedCandidate {
             self.kanaKanjiConverter.forgetMemory(selectedCandidate)
+            if self.isStandardConverterComposing {
+                self.standardKanaKanjiConverter.forgetMemory(selectedCandidate)
+            }
             self.appendDebugMessage("\(#function): forget \(selectedCandidate.data.map {$0.word})")
         }
     }
@@ -477,7 +532,12 @@ public final class SegmentsManager {
         // 不要
         if composingText.isEmpty {
             self.rawCandidates = nil
+            self.standardCandidateResult = nil
             self.kanaKanjiConverter.stopComposition()
+            if self.isStandardConverterComposing {
+                self.standardKanaKanjiConverter.stopComposition()
+                self.isStandardConverterComposing = false
+            }
             return
         }
         // ユーザ辞書情報の更新
@@ -521,19 +581,44 @@ public final class SegmentsManager {
                 .init(word: DateTemplateLiteral(format: "aK時mm分", type: .western, language: .japanese, delta: "0", deltaUnit: 1).export(), ruby: "イマ", cid: CIDData.固有名詞.cid, mid: MIDData.一般.mid, value: -18.2)
             ]
 
+        let shouldCompareZenzai = self.canCompareZenzaiCandidates
+        if shouldCompareZenzai {
+            self.standardKanaKanjiConverter.importDynamicUserDictionary(userDictionary, shortcuts: dynamicShortcuts)
+        }
         self.kanaKanjiConverter.importDynamicUserDictionary(consume userDictionary, shortcuts: dynamicShortcuts)
 
         let prefixComposingText = self.composingText.prefixToCursorPosition()
         let leftSideContext = forcedLeftSideContext ?? self.getCleanLeftSideContext(maxCount: 30)
+        let requireJapanesePrediction: ConvertRequestOptions.PredictionMode = Config.DebugPredictiveTyping().value ? .manualMix : .disabled
+        let requireEnglishPrediction: ConvertRequestOptions.PredictionMode = Config.DebugPredictiveTyping().value ? .manualMix : .disabled
+        if shouldCompareZenzai {
+            self.standardCandidateResult = self.standardKanaKanjiConverter.requestCandidates(
+                prefixComposingText,
+                options: self.options(
+                    leftSideContext: leftSideContext,
+                    requestRichCandidates: requestRichCandidates,
+                    requireJapanesePrediction: requireJapanesePrediction,
+                    requireEnglishPrediction: requireEnglishPrediction,
+                    useZenzai: false
+                )
+            )
+            self.isStandardConverterComposing = true
+        } else {
+            self.standardCandidateResult = nil
+        }
         let result = self.kanaKanjiConverter.requestCandidates(
             prefixComposingText,
             options: options(
                 leftSideContext: leftSideContext,
                 requestRichCandidates: requestRichCandidates,
-                requireJapanesePrediction: Config.DebugPredictiveTyping().value ? .manualMix : .disabled,
-                requireEnglishPrediction: Config.DebugPredictiveTyping().value ? .manualMix : .disabled
+                requireJapanesePrediction: requireJapanesePrediction,
+                requireEnglishPrediction: requireEnglishPrediction
             )
         )
+        let modelURL = Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/ggml-model-Q5_K_M.gguf")
+        if self.kanaKanjiConverter.zenzStatus != "load \(modelURL.absoluteString)" {
+            self.standardCandidateResult = nil
+        }
         self.rawCandidates = result
     }
 
@@ -546,6 +631,10 @@ public final class SegmentsManager {
     @MainActor public func prefixCandidateCommited(_ candidate: Candidate, leftSideContext: String) {
         self.kanaKanjiConverter.setCompletedData(candidate)
         self.kanaKanjiConverter.updateLearningData(candidate)
+        if self.isStandardConverterComposing {
+            self.standardKanaKanjiConverter.setCompletedData(candidate)
+            self.standardKanaKanjiConverter.updateLearningData(candidate)
+        }
         self.composingText.prefixComplete(composingCount: candidate.composingCount)
 
         if !self.composingText.isEmpty {
@@ -641,6 +730,9 @@ public final class SegmentsManager {
         case .none, .previewing, .replaceSuggestion, .attachDiacritic, .unicodeInput:
             return .hidden
         case .composing:
+            if Config.CandidateLinguisticAnalysis().value, let candidates {
+                return .composing(candidates, selectionIndex: self.selectionIndex ?? 0)
+            }
             if !self.liveConversionEnabled, let firstCandidate = self.rawCandidates?.mainResults.first {
                 return .composing([firstCandidate], selectionIndex: 0)
             } else {

@@ -1,6 +1,7 @@
 import Cocoa
 import Core
 import KanaKanjiConverterModule
+import SwiftUI
 
 class NonClickableTableView: NSTableView {
     override func rightMouseDown(with event: NSEvent) {}
@@ -94,6 +95,9 @@ class BaseCandidateViewController: NSViewController {
     internal var candidates: [CandidatePresentation] = []
     internal var tableView: NSTableView!
     internal var currentSelectedRow: Int = -1
+    private var candidateScrollView: NSScrollView!
+    private var conversionTreeScrollView: NSScrollView!
+    private var conversionTreeHostingView: NSHostingView<AnyView>?
 
     override func loadView() {
         // 親ビュー（ZStackのような役割）
@@ -109,6 +113,7 @@ class BaseCandidateViewController: NSViewController {
 
         // Scroll View（前面）
         let scrollView = NSScrollView()
+        self.candidateScrollView = scrollView
         self.tableView = NonClickableTableView()
         self.tableView.style = .plain
         scrollView.documentView = self.tableView
@@ -119,8 +124,18 @@ class BaseCandidateViewController: NSViewController {
         scrollView.backgroundColor = .clear
         scrollView.translatesAutoresizingMaskIntoConstraints = false
 
+        let conversionTreeScrollView = NSScrollView()
+        conversionTreeScrollView.hasHorizontalScroller = true
+        conversionTreeScrollView.hasVerticalScroller = false
+        conversionTreeScrollView.scrollerStyle = .overlay
+        conversionTreeScrollView.drawsBackground = false
+        conversionTreeScrollView.backgroundColor = .clear
+        conversionTreeScrollView.translatesAutoresizingMaskIntoConstraints = false
+        conversionTreeScrollView.isHidden = true
+        self.conversionTreeScrollView = conversionTreeScrollView
+
         // 重ね順に応じて subviews を構成（背面 → 前面）
-        containerView.subviews = [materialView, scrollView]
+        containerView.subviews = [materialView, scrollView, conversionTreeScrollView]
 
         // 制約
         NSLayoutConstraint.activate([
@@ -132,7 +147,11 @@ class BaseCandidateViewController: NSViewController {
             scrollView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
             scrollView.topAnchor.constraint(equalTo: containerView.topAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor)
+            scrollView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor),
+            conversionTreeScrollView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
+            conversionTreeScrollView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
+            conversionTreeScrollView.topAnchor.constraint(equalTo: containerView.topAnchor),
+            conversionTreeScrollView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor)
         ])
 
         self.tableView.backgroundColor = .clear
@@ -180,11 +199,45 @@ class BaseCandidateViewController: NSViewController {
     }
 
     func updateCandidatePresentations(_ candidates: [CandidatePresentation], selectionIndex: Int?, cursorLocation: CGPoint) {
+        self.conversionTreeScrollView.isHidden = true
+        self.candidateScrollView.isHidden = false
         self.candidates = candidates
         self.currentSelectedRow = selectionIndex ?? -1
         self.tableView.reloadData()
         self.resizeWindowToFitContent(cursorLocation: cursorLocation)
         self.updateSelection(to: selectionIndex ?? -1)
+    }
+
+    func showConversionTree<Content: View>(_ content: Content, preferredSize: CGSize, cursorLocation: CGPoint) {
+        guard let window = self.view.window,
+              let screen = ScreenLookup.screen(containing: cursorLocation, fallbackWindow: window) else {
+            return
+        }
+        let desiredSize = CGSize(
+            width: min(preferredSize.width, max(360, screen.visibleFrame.width * 0.68)),
+            height: min(preferredSize.height, max(180, screen.visibleFrame.height * 0.42))
+        )
+        let hostingView: NSHostingView<AnyView>
+        if let existing = self.conversionTreeHostingView {
+            hostingView = existing
+        } else {
+            hostingView = NSHostingView(rootView: AnyView(content))
+            self.conversionTreeHostingView = hostingView
+            self.conversionTreeScrollView.documentView = hostingView
+        }
+        hostingView.rootView = AnyView(content)
+        hostingView.frame = NSRect(x: 0, y: 0, width: preferredSize.width, height: desiredSize.height)
+        self.candidateScrollView.isHidden = true
+        self.conversionTreeScrollView.isHidden = false
+        let frame = WindowPositioning.frameNearCursor(
+            currentFrame: .init(window.frame),
+            screenRect: .init(screen.visibleFrame),
+            cursorLocation: .init(cursorLocation),
+            desiredSize: .init(width: desiredSize.width, height: desiredSize.height)
+        ).cgRect
+        if frame != window.frame {
+            window.setFrame(frame, display: true, animate: false)
+        }
     }
 
     internal func updateSelection(to row: Int) {

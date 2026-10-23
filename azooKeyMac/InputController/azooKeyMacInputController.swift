@@ -820,6 +820,7 @@ extension azooKeyMacInputController: CandidatesViewControllerDelegate {
     func candidateSelectionChanged(_ row: Int) {
         Task { @MainActor in
             self.segmentsManager.requestSelectingRow(row)
+            self.refreshMarkedText()
         }
     }
 }

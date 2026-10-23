@@ -4,6 +4,7 @@ import SwiftUI
 
 struct ConfigWindow: View {
     @ConfigState private var liveConversion = Config.LiveConversion()
+    @ConfigState private var candidateLinguisticAnalysis = Config.CandidateLinguisticAnalysis()
     @ConfigState private var inputStyle = Config.InputStyle()
     @ConfigState private var typeBackSlash = Config.TypeBackSlash()
     @ConfigState private var punctuationStyle = Config.PunctuationStyle()
@@ -448,6 +449,8 @@ struct ConfigWindow: View {
 
             Section {
                 Toggle("ライブ変換を有効化", isOn: $liveConversion)
+                Toggle("入力中に候補の言語情報を表示", isOn: $candidateLinguisticAnalysis)
+                    .help("変換エンジンの品詞情報と、主語候補・述語候補を表示します。文の役割は助詞や文末からの推定です。")
                 HStack {
                     TextField("変換プロフィール", text: $zenzaiProfile, prompt: Text("例：田中太郎/高校生"))
                     helpButton(

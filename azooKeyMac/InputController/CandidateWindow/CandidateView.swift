@@ -10,15 +10,49 @@ protocol CandidatesViewControllerDelegate: AnyObject {
 class CandidatesViewController: BaseCandidateViewController {
     weak var delegate: (any CandidatesViewControllerDelegate)?
     private var showedRows: ClosedRange = 0...8
+    private var lastCursorLocation: CGPoint = .zero
+    private var linguisticAnalysisEnabled: Bool {
+        Config.CandidateLinguisticAnalysis().value
+    }
     var showCandidateIndex = false
 
     override func updateCandidatePresentations(_ candidates: [CandidatePresentation], selectionIndex: Int?, cursorLocation: CGPoint) {
+        self.lastCursorLocation = cursorLocation
         self.showedRows = selectionIndex == nil ? 0...8 : self.showedRows
         super.updateCandidatePresentations(
             candidates,
             selectionIndex: selectionIndex,
             cursorLocation: cursorLocation
         )
+        self.refreshConversionTree()
+    }
+
+    override internal func updateSelection(to row: Int) {
+        super.updateSelection(to: row)
+        self.refreshConversionTree()
+    }
+
+    private func refreshConversionTree() {
+        guard !self.candidates.isEmpty else {
+            return
+        }
+        let selectedIndex = self.candidates.indices.contains(self.currentSelectedRow) ? self.currentSelectedRow : 0
+        let alternativeCount = self.candidates.count - 1
+        let content = ConversionTreeView(
+            presentations: self.candidates,
+            selectedIndex: selectedIndex,
+            numberedCandidateRange: self.showedRows,
+            showLinguisticAnalysis: self.linguisticAnalysisEnabled,
+            onSelect: { [weak self] row in
+                self?.updateSelection(to: row)
+            }
+        )
+        let preferredSize = ConversionTreeView.preferredSize(
+            tokenCount: self.candidates[selectedIndex].candidate.data.count,
+            alternativeCount: alternativeCount,
+            candidateCount: self.candidates.count
+        )
+        self.showConversionTree(content, preferredSize: preferredSize, cursorLocation: self.lastCursorLocation)
     }
 
     override internal func updateSelectionCallback(_ row: Int) {
