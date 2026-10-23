@@ -1,11 +1,24 @@
-# Conversion candidate tree
+# 木構造の変換候補ウィンドウ
 
-The macOS candidate window presents each selected candidate as a horizontal token path. Other candidates branch under a token when they contain a token with the same reading span. Clicking a branch selects the original full candidate row, so keyboard navigation and candidate submission continue to use the converter's existing selection flow. When token data is absent or does not reconstruct the candidate text, the tree shows the full candidate and leaves it out of span alignment; the scrollable candidate list remains available for selection.
+選択中の候補を横方向の語列として表示し、同じ読み範囲に対応する別候補を下に分岐させます。枝のクリックは、その語を含む実際の候補全体の選択に連動します。文節の区切りが異なる候補やテンプレート展開後の候補も、下の候補一覧から選択できます。従来のキーボード操作と確定処理は維持しています。長い文章は横スクロール、枝や候補一覧は縦スクロールできます。
 
-The percentage under each token is a softmax conversion of the converter's candidate evaluation scores across the candidates currently shown. It is a relative estimate for that set, not a calibrated probability. Blue means 90% or higher, orange means 30% through 89%, and red means below 30%.
+## 数値と色
 
-When the bundled Zenzai model loads, the manager also requests a comparison result from a second converter with Zenzai turned off. It receives the same active dictionary entries, input, context, and completion updates. A token is purple only when the top Zenzai result differs from the standard result over the same reading span. Tokens with different segmentation are left unmarked because there is no exact span to compare. The comparison adds another conversion request while the tree is active.
+数字は候補の評価スコアをsoftmaxで正規化した、候補内の相対的な推定値です。正解率やモデルが直接返す確率ではありません。同じ読み範囲・表記を持つ語は、該当する候補の値を合算します。異なる区切りの候補は枝に含まれないため、枝の合計が100%にならない場合があります。
 
-The optional language information setting uses macOS Natural Language tagging for broad part-of-speech labels and the converter's connection IDs for particles, auxiliaries, prefixes, and suffix nouns. 主語候補 is a shallow hint for a noun immediately before は or が, and 述語候補 is a hint for a sentence-final verb, adjective, or auxiliary. These are local heuristics, not grammatical analysis or a dependency parse. Unclassified words are shown as 語.
+- 90%以上：青
+- 30%以上90%未満：オレンジ
+- 30%未満：赤
+- Zenzaiによって選択が変化した語：紫（確率の色より優先）
 
-The Zenzai comparison is available only when the bundled model file loads successfully. The repository checkout may not include model resources, so the purple comparison is unavailable in builds without that model. Score percentages remain relative estimates even when Zenzai is enabled; the converter does not expose calibrated probabilities or per-token Zenzai provenance.
+Zenzaiのモデルが正常に読み込まれたときだけ、同じ入力・辞書・設定を使い、Zenzaiを無効にした別の変換器との比較を行います。先頭候補の同じ読み範囲で表記が変わった語を紫にします。区切りが異なる場合や、モデルが読み込めない場合は紫にしません。これは比較による表示であり、エンジン内部の補正履歴ではありません。比較用の変換器から学習データを保存する処理は呼びません。比較には追加の変換処理とメモリが必要です。
+
+## 品詞・文の役割
+
+設定の「入力中に候補の言語情報を表示」で切り替えます（初期値はオフ）。変換辞書の接続IDから、名詞・動詞・形容詞・助詞・助動詞などを表示します。対応範囲は依存エンジンのCIDDataと[IPADICの接続ID定義](https://github.com/taku910/mecab/blob/master/mecab-ipadic/left-id.def)を照合しています。未対応のIDは「語」と表示します。
+
+「は」「が」の直前の名詞に「主語候補」、文末（句読点を除く）の動詞・形容詞・助動詞に「述語候補」を付けます。これらは簡易的な推定で、係り受け解析や文法的な正しさを保証するものではありません。解析はローカルで行います。
+
+## ビルド・検証の制約
+
+このチェックアウトには、プロジェクトが参照するazooKeyMac/Resourcesの言語モデル（.marisaと.gguf）がありません。通常のアプリビルドや実際のZenzai入力を検証するには、元プロジェクトで指定されたモデル資産の用意が必要です。モデルがない状態でのテストや画面描画を、Zenzaiを使用した実入力の検証とは扱いません。

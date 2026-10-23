@@ -20,9 +20,26 @@ import Testing
 }
 
 @Test func candidateTreeScoreBandsUseRequestedBoundaries() {
+    #expect(CandidateTreeScoreBand(percentage: 89) == .medium)
     #expect(CandidateTreeScoreBand(percentage: 90) == .high)
     #expect(CandidateTreeScoreBand(percentage: 30) == .medium)
     #expect(CandidateTreeScoreBand(percentage: 29) == .low)
+}
+
+@Test func candidateTreePartsOfSpeechUseDictionaryIDs() {
+    #expect(CandidateTreeAnalysis.partOfSpeechLabel(leftID: 1285, rightID: 1285) == "名詞")
+    #expect(CandidateTreeAnalysis.partOfSpeechLabel(leftID: 561, rightID: 561) == "動詞")
+    #expect(CandidateTreeAnalysis.partOfSpeechLabel(leftID: 11, rightID: 11) == "形容詞")
+    #expect(CandidateTreeAnalysis.partOfSpeechLabel(leftID: 261, rightID: 261) == "助詞")
+    #expect(CandidateTreeAnalysis.partOfSpeechLabel(leftID: 460, rightID: 460) == "助動詞")
+    #expect(CandidateTreeAnalysis.partOfSpeechLabel(leftID: -1, rightID: 1285) == "名詞")
+    #expect(CandidateTreeAnalysis.partOfSpeechLabel(leftID: 9999, rightID: -1) == "語")
+}
+
+@Test func candidateTreeScoresHandleEmptyAndExtremeInputs() {
+    #expect(CandidateTreeAnalysis.estimatedPercentages(scores: []).isEmpty)
+    #expect(CandidateTreeAnalysis.estimatedPercentages(scores: [.nan, -.infinity]) == [0, 0])
+    #expect(CandidateTreeAnalysis.estimatedPercentages(scores: [10000, -10000]) == [100, 0])
 }
 
 @Test func zenzaiComparisonMarksOnlyChangedTokensWithMatchingReadingSpans() {

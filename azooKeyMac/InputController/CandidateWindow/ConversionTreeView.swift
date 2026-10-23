@@ -276,7 +276,7 @@ struct ConversionTreeView: View {
                baseLabels[index + 1] == "助詞" {
                 label += " · 主語候補"
             }
-            let isLastWord = index == candidate.data.count - 1
+            let isLastWord = index == baseLabels.lastIndex(where: { $0 != "記号" })
             if isLastWord, ["動詞", "形容詞", "助動詞"].contains(baseLabels[index]) {
                 label += " · 述語候補"
             }
