@@ -60,39 +60,24 @@ GitHub Sponsorsをご利用ください。
 ### 必要な環境
 * macOS 15+
 * Xcode 26.1+
-* Git LFS（必須。Hugging Face上のsubmoduleがLFSを利用しているため、未導入だとモデル重みが取得できません）
+* Python 3
 * SwiftLint
 
 ```bash
-brew install git-lfs swiftlint
-git lfs install
+brew install swiftlint
 ```
 
 ### 開発版のビルド・デバッグ
 
-#### 1. クローン
+#### 1. モデルファイルの取得
 
-submoduleにzenzのgguf重みと言語モデル（`.marisa`）が含まれるため、`--recursive`と Git LFS の有効化が必須です。
-
-```bash
-git lfs install        # 未実行の場合のみ
-git clone https://github.com/azooKey/azooKey-Desktop --recursive
-cd azooKey-Desktop
-```
-
-既にcloneしていてsubmoduleやLFSが揃っていない場合は以下を実行してください。
+Zenzaiの重みと個人最適化用の言語モデルはHugging Faceから取得します。次のスクリプトは固定した版をダウンロードし、各ファイルのサイズとSHA-256を確認してから配置します。検証済みのファイルは再利用します。
 
 ```bash
-git submodule update --init
-git -C azooKeyMac/Resources/zenz-v3.1-small-gguf lfs pull
-git -C azooKeyMac/Resources/base_n5_lm lfs pull
+python3 scripts/download-models.py
 ```
 
-重みファイルが正しく取得できているか、サイズで確認できます（数十MB以上あればLFSの実体、134B程度ならポインタのままです）。
-
-```bash
-ls -lh azooKeyMac/Resources/zenz-v3.1-small-gguf/ggml-model-Q5_K_M.gguf
-```
+取得元は[zenz-v3.1-small-gguf](https://huggingface.co/Miwa-Keita/zenz-v3.1-small-gguf)と[base_n5_lm](https://huggingface.co/Miwa-Keita/base_n5_lm)です。スクリプトにリポジトリのリビジョンと各ファイルのSHA-256を記録しています。
 
 #### 2. 署名の設定（初回のみ）
 
@@ -120,8 +105,7 @@ ls -lh azooKeyMac/Resources/zenz-v3.1-small-gguf/ggml-model-Q5_K_M.gguf
 * 「Packages are not supported when using legacy build locations, but the current project has them enabled.」と表示される場合は[https://qiita.com/glassmonkey/items/3e8203900b516878ff2c](https://qiita.com/glassmonkey/items/3e8203900b516878ff2c)を参考に、Xcodeの設定をご確認ください
 * Xcode 26.0ではビルドできない可能性があります。Xcode 16系または26.1以降をご利用ください。
 
-変換精度がリリース版に比べて悪いと感じた場合、以下をご確認ください。
-* Git LFSが導入されていない環境では、重みファイルがローカル環境に落とせていない場合があります。`azooKeyMac/Resources/zenz-v3.1-small-gguf/ggml-model-Q5_K_M.gguf` が数十MB以上あるかを確認し、ポインタのままであれば `git -C azooKeyMac/Resources/zenz-v3.1-small-gguf lfs pull` を実行してください
+変換精度がリリース版に比べて悪いと感じた場合は、`python3 scripts/download-models.py` を実行してモデルファイルの検証をやり直してください。
 
 ### pkgファイルの作成
 `pkgbuild.sh`によって配布用のdmgファイルを作成できます。`build/azooKeyMac.app` としてDeveloper IDで署名済みの.appを配置してください。

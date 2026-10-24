@@ -1,0 +1,11 @@
+---
+triple:          'arm64-apple-darwin'
+binary-path:     '/Users/yuyudao/Library/Developer/Xcode/DerivedData/azooKeyMac-elrbixcbqvtauefaxupctitxmpif/Build/Intermediates.noindex/ArchiveIntermediates/azooKeyMac/IntermediateBuildFilesPath/UninstalledProducts/macosx/git-info-generator'
+relocations:
+  - { offset: 0x713F7, size: 0x8, addend: 0x0, symName: _main, symObjAddr: 0x0, symBinAddr: 0x100000B00, symSize: 0x2CC }
+  - { offset: 0x715B1, size: 0x8, addend: 0x0, symName: _main, symObjAddr: 0x0, symBinAddr: 0x100000B00, symSize: 0x2CC }
+  - { offset: 0x71708, size: 0x8, addend: 0x0, symName: '_$s18git_info_generator5shellyS2SKF', symObjAddr: 0x2CC, symBinAddr: 0x100000DCC, symSize: 0x354 }
+  - { offset: 0x71841, size: 0x8, addend: 0x0, symName: ___swift_instantiateConcreteTypeFromMangledNameV2, symObjAddr: 0x620, symBinAddr: 0x100001120, symSize: 0x50 }
+  - { offset: 0x71855, size: 0x8, addend: 0x0, symName: '_$sS2SSysWl', symObjAddr: 0x670, symBinAddr: 0x100001170, symSize: 0x40 }
+  - { offset: 0x71869, size: 0x8, addend: 0x0, symName: '_$s10Foundation4DataV15_RepresentationOWOe', symObjAddr: 0x6B0, symBinAddr: 0x1000011B0, symSize: 0x40 }
+...

@@ -575,6 +575,7 @@ class azooKeyMacInputController: IMKInputController, NSMenuItemValidation { // s
             var rect: NSRect = .zero
             self.client().attributes(forCharacterIndex: 0, lineHeightRectangle: &rect)
             self.candidatesViewController.showCandidateIndex = true
+            self.candidatesViewController.setConversionTreePresentations(nil)
             let candidatePresentations = self.segmentsManager.makeCandidatePresentations(candidates)
             self.candidatesViewController.updateCandidatePresentations(
                 candidatePresentations,
@@ -582,10 +583,13 @@ class azooKeyMacInputController: IMKInputController, NSMenuItemValidation { // s
                 cursorLocation: rect.origin
             )
             self.candidatesWindow.orderFront(nil)
-        case .composing(let candidates, let selectionIndex):
+        case .composing(let candidates, let selectionIndex, let treeCandidates):
             var rect: NSRect = .zero
             self.client().attributes(forCharacterIndex: 0, lineHeightRectangle: &rect)
             self.candidatesViewController.showCandidateIndex = false
+            self.candidatesViewController.setConversionTreePresentations(
+                self.segmentsManager.makeCandidatePresentations(treeCandidates)
+            )
             let candidatePresentations = self.segmentsManager.makeCandidatePresentations(candidates)
             self.candidatesViewController.updateCandidatePresentations(
                 candidatePresentations,
@@ -819,8 +823,13 @@ extension azooKeyMacInputController: CandidatesViewControllerDelegate {
 
     func candidateSelectionChanged(_ row: Int) {
         Task { @MainActor in
+            if self.inputState == .composing {
+                self.inputState = .selecting
+                self.segmentsManager.requestSetCandidateWindowState(visible: true)
+            }
             self.segmentsManager.requestSelectingRow(row)
             self.refreshMarkedText()
+            self.refreshCandidateWindow()
         }
     }
 }

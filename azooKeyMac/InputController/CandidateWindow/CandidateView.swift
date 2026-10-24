@@ -15,15 +15,23 @@ class CandidatesViewController: BaseCandidateViewController {
         Config.CandidateLinguisticAnalysis().value
     }
     var showCandidateIndex = false
+    private var conversionTreePresentations: [CandidatePresentation]?
+    private var isUpdatingPresentations = false
+
+    func setConversionTreePresentations(_ presentations: [CandidatePresentation]?) {
+        self.conversionTreePresentations = presentations
+    }
 
     override func updateCandidatePresentations(_ candidates: [CandidatePresentation], selectionIndex: Int?, cursorLocation: CGPoint) {
         self.lastCursorLocation = cursorLocation
         self.showedRows = selectionIndex == nil ? 0...8 : self.showedRows
+        self.isUpdatingPresentations = true
         super.updateCandidatePresentations(
             candidates,
             selectionIndex: selectionIndex,
             cursorLocation: cursorLocation
         )
+        self.isUpdatingPresentations = false
         self.refreshConversionTree()
     }
 
@@ -40,23 +48,27 @@ class CandidatesViewController: BaseCandidateViewController {
         let alternativeCount = self.candidates.count - 1
         let content = ConversionTreeView(
             presentations: self.candidates,
+            treePresentations: self.conversionTreePresentations,
             selectedIndex: selectedIndex,
-            numberedCandidateRange: self.showedRows,
+            numberedCandidateRange: self.showCandidateIndex ? self.showedRows : nil,
             showLinguisticAnalysis: self.linguisticAnalysisEnabled,
             onSelect: { [weak self] row in
                 self?.updateSelection(to: row)
             }
         )
         let preferredSize = ConversionTreeView.preferredSize(
-            tokenCount: self.candidates[selectedIndex].candidate.data.count,
+            presentations: self.conversionTreePresentations ?? self.candidates,
+            selectedIndex: self.conversionTreePresentations == nil ? selectedIndex : 0,
             alternativeCount: alternativeCount,
-            candidateCount: self.candidates.count
+            showLinguisticAnalysis: self.linguisticAnalysisEnabled
         )
         self.showConversionTree(content, preferredSize: preferredSize, cursorLocation: self.lastCursorLocation)
     }
 
     override internal func updateSelectionCallback(_ row: Int) {
-        delegate?.candidateSelectionChanged(row)
+        if !self.isUpdatingPresentations {
+            delegate?.candidateSelectionChanged(row)
+        }
 
         if !self.showedRows.contains(row) {
             if row < self.showedRows.lowerBound {

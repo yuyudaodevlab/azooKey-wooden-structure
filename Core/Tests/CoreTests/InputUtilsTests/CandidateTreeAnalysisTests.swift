@@ -42,6 +42,12 @@ import Testing
     #expect(CandidateTreeAnalysis.estimatedPercentages(scores: [10000, -10000]) == [100, 0])
 }
 
+@Test func candidateTreeEstimatesNormalizeComparableWordsAndIgnoreUnavailableFallbacks() {
+    #expect(CandidateTreeAnalysis.estimatedPercentageLabels(scores: [-7.0, -8.0, nil]) == ["73%", "27%", "—"])
+    #expect(CandidateTreeAnalysis.estimatedPercentageLabels(scores: [-50.0, -60.0]) == ["100%", "<1%"])
+    #expect(CandidateTreeAnalysis.estimatedPercentageLabels(scores: [nil, .nan]) == ["—", "—"])
+}
+
 @Test func zenzaiComparisonMarksOnlyChangedTokensWithMatchingReadingSpans() {
     let spans = [CandidateTreeReadingSpan(start: 0, end: 2), CandidateTreeReadingSpan(start: 2, end: 4)]
     let changed = CandidateTreeAnalysis.changedElementIndices(

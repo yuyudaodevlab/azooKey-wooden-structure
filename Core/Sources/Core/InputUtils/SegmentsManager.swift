@@ -649,7 +649,7 @@ public final class SegmentsManager {
 
     public enum CandidateWindow: Sendable {
         case hidden
-        case composing([Candidate], selectionIndex: Int?)
+        case composing([Candidate], selectionIndex: Int?, treeCandidates: [Candidate])
         case selecting([Candidate], selectionIndex: Int?)
     }
 
@@ -730,14 +730,21 @@ public final class SegmentsManager {
         case .none, .previewing, .replaceSuggestion, .attachDiacritic, .unicodeInput:
             return .hidden
         case .composing:
-            if Config.CandidateLinguisticAnalysis().value, let candidates {
-                return .composing(candidates, selectionIndex: self.selectionIndex ?? 0)
+            let composingPrefix = self.composingText.prefixToCursorPosition()
+            let fullCandidates = self.rawCandidates?.mainResults.filter {
+                composingPrefix.isWholeComposingText(composingCount: $0.composingCount)
+            } ?? []
+            guard !fullCandidates.isEmpty else { return .hidden }
+            let treeCandidates = fullCandidates + (self.candidates ?? []).filter { candidate in
+                !fullCandidates.contains {
+                    $0.text == candidate.text && $0.composingCount == candidate.composingCount
+                }
             }
-            if !self.liveConversionEnabled, let firstCandidate = self.rawCandidates?.mainResults.first {
-                return .composing([firstCandidate], selectionIndex: 0)
-            } else {
-                return .hidden
-            }
+            return .composing(
+                self.candidates ?? fullCandidates,
+                selectionIndex: self.selectionIndex ?? 0,
+                treeCandidates: treeCandidates
+            )
         case .selecting:
             if self.shouldShowDebugCandidateWindow {
                 self.selectionIndex = max(0, min(self.selectionIndex ?? 0, debugCandidates.count - 1))

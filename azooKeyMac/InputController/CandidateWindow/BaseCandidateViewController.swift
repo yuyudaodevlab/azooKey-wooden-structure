@@ -226,7 +226,7 @@ class BaseCandidateViewController: NSViewController {
             self.conversionTreeScrollView.documentView = hostingView
         }
         hostingView.rootView = AnyView(content)
-        hostingView.frame = NSRect(x: 0, y: 0, width: preferredSize.width, height: desiredSize.height)
+        hostingView.frame = NSRect(x: 0, y: 0, width: desiredSize.width, height: desiredSize.height)
         self.candidateScrollView.isHidden = true
         self.conversionTreeScrollView.isHidden = false
         let frame = WindowPositioning.frameNearCursor(

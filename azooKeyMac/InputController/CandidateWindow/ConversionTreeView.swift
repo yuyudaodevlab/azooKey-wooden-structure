@@ -1,14 +1,15 @@
+import AppKit
 import Core
 import KanaKanjiConverterModule
 import SwiftUI
 
 private struct ConversionTreeToken: Identifiable {
-    var id: String { "\(candidateIndex)-\(readingStart)-\(readingEnd)-\(text)" }
-    let candidateIndex: Int
+    var id: String { "\(candidateIndex ?? -1)-\(readingStart)-\(readingEnd)-\(text)" }
+    let candidateIndex: Int?
     let readingStart: Int
     let readingEnd: Int
     let text: String
-    let percentage: Int
+    let percentage: String
     let partOfSpeech: String?
     let isZenzaiCorrection: Bool
 }
@@ -25,135 +26,111 @@ private struct ConversionTreePiece {
     let text: String
     let elementIndex: Int?
     let alignmentAvailable: Bool
+    let score: Double?
 }
 
 struct ConversionTreeView: View {
     let presentations: [CandidatePresentation]
+    let treePresentations: [CandidatePresentation]?
     let selectedIndex: Int
-    let numberedCandidateRange: ClosedRange<Int>
+    let numberedCandidateRange: ClosedRange<Int>?
     let showLinguisticAnalysis: Bool
     let onSelect: (Int) -> Void
 
-    private var candidatePercentages: [Int] {
-        CandidateTreeAnalysis.estimatedPercentages(scores: self.presentations.map { Double($0.candidate.value) })
+    private var sourcePresentations: [CandidatePresentation] {
+        self.treePresentations ?? self.presentations
     }
 
     private var columns: [ConversionTreeColumn] {
-        guard !self.presentations.isEmpty else {
-            return []
+        let sources = self.sourcePresentations
+        guard !sources.isEmpty else { return [] }
+        let activeIndex = self.presentations.indices.contains(self.selectedIndex) ? self.selectedIndex : 0
+        let sourceCandidates = sources.map(\.candidate)
+        let piecesByCandidate = sourceCandidates.map(Self.pieces(for:))
+        let linguisticLabels = self.showLinguisticAnalysis ? sourceCandidates.map(Self.linguisticLabels(for:)) : []
+        let activeCandidate = self.presentations.indices.contains(activeIndex) ? self.presentations[activeIndex].candidate : nil
+        let selectedSourceIndex: Int
+        if self.treePresentations == nil, let activeCandidate,
+           let mappedIndex = sources.firstIndex(where: {
+               $0.candidate.text == activeCandidate.text && $0.candidate.composingCount == activeCandidate.composingCount
+           }) {
+            selectedSourceIndex = mappedIndex
+        } else {
+            selectedSourceIndex = 0
         }
-        let selectedIndex = self.presentations.indices.contains(self.selectedIndex) ? self.selectedIndex : 0
-        let candidates = self.presentations.map(\.candidate)
-        let candidatePercentages = self.candidatePercentages
-        let piecesByCandidate = candidates.map(Self.pieces(for:))
-        let linguisticLabels = self.showLinguisticAnalysis ? candidates.map(Self.linguisticLabels(for:)) : []
-        let selectedCandidate = candidates[selectedIndex]
-        let selectedPieces = piecesByCandidate[selectedIndex]
+        let selectedPieces = piecesByCandidate[selectedSourceIndex]
 
         return selectedPieces.indices.map { pieceIndex in
             let selectedPiece = selectedPieces[pieceIndex]
             let span = selectedPiece.span
-            var grouped: [String: (token: ConversionTreeToken, weight: Int)] = [:]
-            for candidateIndex in candidates.indices {
-                guard selectedPiece.alignmentAvailable else { continue }
-                guard let alignedIndex = piecesByCandidate[candidateIndex].firstIndex(where: { $0.span == span }) else {
-                    continue
-                }
+            var scoreByText: [String: Double] = [:]
+            var candidateByText: [String: Int] = [:]
+            for candidateIndex in sourceCandidates.indices {
+                guard selectedPiece.alignmentAvailable,
+                      let alignedIndex = piecesByCandidate[candidateIndex].firstIndex(where: { $0.span == span }) else { continue }
                 let piece = piecesByCandidate[candidateIndex][alignedIndex]
-                guard piece.alignmentAvailable else { continue }
-                let key = "\(span.start):\(span.end):\(piece.text)"
-                if var value = grouped[key] {
-                    value.weight += candidatePercentages[candidateIndex]
-                    grouped[key] = value
-                } else {
-                    grouped[key] = (
-                        token: ConversionTreeToken(
-                            candidateIndex: candidateIndex,
-                            readingStart: span.start,
-                            readingEnd: span.end,
-                            text: piece.text,
-                            percentage: candidatePercentages[candidateIndex],
-                            partOfSpeech: linguisticLabels.isEmpty ? nil : linguisticLabels[candidateIndex][alignedIndex],
-                            isZenzaiCorrection: piece.elementIndex.map(presentations[candidateIndex].displayContext.zenzaiAdjustedElementIndices.contains) ?? !presentations[candidateIndex].displayContext.zenzaiAdjustedElementIndices.isEmpty
-                        ),
-                        weight: candidatePercentages[candidateIndex]
-                    )
-                }
+                guard piece.alignmentAvailable, let score = piece.score else { continue }
+                scoreByText[piece.text] = max(scoreByText[piece.text] ?? -.infinity, score)
+                candidateByText[piece.text] = candidateByText[piece.text] ?? candidateIndex
             }
-
-            let orderedGroups = grouped.values.sorted { left, right in
-                let leftIsSelected = left.token.text == selectedPiece.text
-                let rightIsSelected = right.token.text == selectedPiece.text
-                if leftIsSelected != rightIsSelected {
-                    return true
+            let orderedTexts = scoreByText.keys.sorted { left, right in
+                let leftSelected = left == selectedPiece.text
+                let rightSelected = right == selectedPiece.text
+                if leftSelected != rightSelected { return leftSelected }
+                if scoreByText[left] != scoreByText[right] {
+                    return (scoreByText[left] ?? -.infinity) > (scoreByText[right] ?? -.infinity)
                 }
-                if left.weight != right.weight {
-                    return left.weight > right.weight
-                }
-                return left.token.candidateIndex < right.token.candidateIndex
+                return left < right
             }
-            let selectedGroup = orderedGroups.first { $0.token.text == selectedPiece.text }
-            let selectedToken = ConversionTreeToken(
-                candidateIndex: selectedIndex,
+            let labels = CandidateTreeAnalysis.estimatedPercentageLabels(
+                scores: orderedTexts.map { scoreByText[$0] }
+            )
+            let labelByText = Dictionary(uniqueKeysWithValues: zip(orderedTexts, labels))
+            let sourceIndex = candidateByText[selectedPiece.text] ?? selectedSourceIndex
+            let selectedElementIndex = selectedPiece.elementIndex
+            let selected = ConversionTreeToken(
+                candidateIndex: Self.selectableIndex(
+                    in: self.presentations,
+                    candidate: sourceCandidates[sourceIndex]
+                ),
                 readingStart: span.start,
                 readingEnd: span.end,
                 text: selectedPiece.text,
-                percentage: selectedGroup?.weight ?? candidatePercentages[selectedIndex],
-                partOfSpeech: linguisticLabels.isEmpty ? nil : linguisticLabels[selectedIndex][pieceIndex],
-                isZenzaiCorrection: selectedPiece.elementIndex.map(presentations[selectedIndex].displayContext.zenzaiAdjustedElementIndices.contains) ?? !presentations[selectedIndex].displayContext.zenzaiAdjustedElementIndices.isEmpty
+                percentage: labelByText[selectedPiece.text] ?? "—",
+                partOfSpeech: linguisticLabels.isEmpty ? nil : linguisticLabels[selectedSourceIndex][pieceIndex],
+                isZenzaiCorrection: selectedElementIndex.map(sources[selectedSourceIndex].displayContext.zenzaiAdjustedElementIndices.contains) ?? false
             )
-            let alternatives = orderedGroups
-                .filter { $0.token.text != selectedToken.text }
-                .map { group in
-                    ConversionTreeToken(
-                        candidateIndex: group.token.candidateIndex,
+            let alternatives = orderedTexts
+                .filter { $0 != selectedPiece.text }
+                .prefix(2)
+                .compactMap { text -> ConversionTreeToken? in
+                    guard let candidateIndex = candidateByText[text] else { return nil }
+                    let elementIndex = piecesByCandidate[candidateIndex].firstIndex(where: { $0.span == span })
+                    return ConversionTreeToken(
+                        candidateIndex: Self.selectableIndex(in: self.presentations, candidate: sourceCandidates[candidateIndex]),
                         readingStart: span.start,
                         readingEnd: span.end,
-                        text: group.token.text,
-                        percentage: group.weight,
-                        partOfSpeech: group.token.partOfSpeech,
-                        isZenzaiCorrection: group.token.isZenzaiCorrection
+                        text: text,
+                        percentage: labelByText[text] ?? "—",
+                        partOfSpeech: linguisticLabels.isEmpty || elementIndex == nil ? nil : linguisticLabels[candidateIndex][elementIndex!],
+                        isZenzaiCorrection: elementIndex.map(sources[candidateIndex].displayContext.zenzaiAdjustedElementIndices.contains) ?? false
                     )
                 }
-            return ConversionTreeColumn(readingStart: span.start, selected: selectedToken, alternatives: alternatives)
+            return ConversionTreeColumn(readingStart: span.start, selected: selected, alternatives: alternatives)
         }
     }
 
     var body: some View {
-        ScrollViewReader { proxy in
-          let columns = self.columns
-          let candidatePercentages = self.candidatePercentages
-          let hasZenzaiCorrection = columns.contains { $0.selected.isZenzaiCorrection }
-          ScrollView(.vertical) {
-            VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("変換候補のつながり")
-                        .font(.system(size: 13, weight: .semibold))
-                    Text("スコア比の推定値 · 表示中の候補内")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 12)
-                VStack(alignment: .trailing, spacing: 4) {
-                  HStack(spacing: 8) {
-                    ScoreLegend(color: .blue, label: "90%以上")
-                    ScoreLegend(color: .orange, label: "30–89%")
-                    ScoreLegend(color: .red, label: "30%未満")
-                  }
-                  if hasZenzaiCorrection {
-                      Label("Zenzaiによる変更", systemImage: "sparkles")
-                          .font(.system(size: 10, weight: .medium))
-                          .foregroundStyle(Color.purple)
-                  }
-                }
-            }
+        let columns = self.columns
+        VStack(alignment: .leading, spacing: 0) {
+        ScrollView(.horizontal) {
             HStack(alignment: .top, spacing: 0) {
                 ForEach(columns.indices, id: \.self) { index in
                     if index > 0 {
-                        ConversionTreePathConnector()
-                            .stroke(Color.secondary.opacity(0.36), lineWidth: 1.2)
-                            .frame(width: 16, height: 68)
+                        Rectangle()
+                            .fill(Color.secondary.opacity(0.45))
+                            .frame(width: 14, height: 1)
+                            .padding(.top, 12)
                     }
                     ConversionTreeColumnView(
                         column: columns[index],
@@ -162,83 +139,58 @@ struct ConversionTreeView: View {
                     )
                 }
             }
-            .padding(.vertical, 4)
-            Divider()
-            VStack(alignment: .leading, spacing: 4) {
-                Text("候補一覧")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                ScrollViewReader { candidateProxy in
-                  ScrollView(.vertical) {
-                    LazyVStack(alignment: .leading, spacing: 2) {
-                      ForEach(self.presentations.indices, id: \.self) { row in
-                    Button {
-                        self.onSelect(row)
-                    } label: {
-                        HStack(spacing: 8) {
-                            Text(self.numberedCandidateRange.contains(row) ? "\(row - self.numberedCandidateRange.lowerBound + 1)." : "\(row + 1).")
-                                .font(.system(size: 10, design: .monospaced))
-                                .frame(width: 24, alignment: .trailing)
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(self.presentations[row].candidate.text)
-                                    .font(.system(size: 13))
-                                    .lineLimit(1)
-                                if let annotation = self.presentations[row].displayContext.annotationText {
-                                    Text(annotation)
-                                        .font(.system(size: 10))
-                                        .foregroundStyle(self.selectedIndex == row ? Color.white.opacity(0.82) : Color.secondary)
-                                        .lineLimit(1)
-                                }
-                            }
-                            Spacer(minLength: 8)
-                            Text("\(candidatePercentages[row])%")
-                                .font(.system(size: 10, design: .monospaced))
-                                .foregroundStyle(self.selectedIndex == row ? Color.white : Self.color(for: candidatePercentages[row]))
-                        }
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .background(self.selectedIndex == row ? Color.accentColor : Color.clear, in: RoundedRectangle(cornerRadius: 5))
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("候補 \(row + 1): \(self.presentations[row].candidate.text)")
-                    .id("candidate-row-\(row)")
-                      }
-                    }
-                  }
-                  .frame(maxHeight: 200)
-                  .onAppear {
-                      candidateProxy.scrollTo("candidate-row-\(self.selectedIndex)", anchor: .center)
-                  }
-                  .onChange(of: self.selectedIndex) { newValue in
-                      candidateProxy.scrollTo("candidate-row-\(newValue)", anchor: .center)
-                  }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+        }
+        .scrollIndicators(.hidden)
+        HStack(spacing: 8) {
+            Text("語ごとの推定比率")
+                .font(.system(size: 9))
+                .foregroundStyle(.secondary)
+                .help("同じ読み範囲の候補を辞書スコアで比較した値です。正解率やZenzaiの確率ではありません。候補が1つなら100%になります。")
+            Spacer(minLength: 0)
+            Menu("候補…") {
+                ForEach(self.presentations.indices, id: \.self) { index in
+                    let number = self.numberedCandidateRange.flatMap { range in
+                        range.contains(index) ? "\(index - range.lowerBound + 1). " : nil
+                    } ?? ""
+                    Button(number + self.presentations[index].candidate.text) { self.onSelect(index) }
                 }
             }
-            .frame(maxWidth: 560, alignment: .leading)
-            }
-            .padding(12)
-            .id("conversion-tree-top")
-            .background(.regularMaterial)
-            .accessibilityElement(children: .contain)
-            .accessibilityLabel("変換候補ツリー")
-          }
-          .onAppear { proxy.scrollTo("conversion-tree-top", anchor: .top) }
-          .onChange(of: self.selectedIndex) { _ in proxy.scrollTo("conversion-tree-top", anchor: .top) }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .font(.system(size: 10))
         }
+        .padding(.horizontal, 10)
+        .padding(.bottom, 5)
+        }
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 9))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("変換候補ツリー。語ごとの推定比率は辞書スコアに基づき、文全体の確率ではありません")
     }
 
-    static func preferredSize(tokenCount: Int, alternativeCount: Int, candidateCount: Int) -> CGSize {
-        CGSize(
-            width: max(560, CGFloat(tokenCount) * 138 + 40),
-            height: max(220, CGFloat(alternativeCount) * 42 + CGFloat(candidateCount) * 32 + 200)
-        )
+    static func preferredSize(
+        presentations: [CandidatePresentation],
+        selectedIndex: Int,
+        alternativeCount: Int,
+        showLinguisticAnalysis: Bool
+    ) -> CGSize {
+        guard presentations.indices.contains(selectedIndex) else {
+            return CGSize(width: 340, height: 96)
+        }
+        let candidate = presentations[selectedIndex].candidate
+        let font = NSFont.systemFont(ofSize: 15, weight: .semibold)
+        let pathWidth = candidate.data.reduce(CGFloat(0)) { partial, element in
+            partial + min(140, max(36, (element.word as NSString).size(withAttributes: [.font: font]).width + 16)) + 15
+        }
+        let maxAlternatives = min(2, max(0, alternativeCount))
+        let rowHeight: CGFloat = showLinguisticAnalysis ? 55 : 42
+        return CGSize(width: min(960, max(220, pathWidth + 24)), height: CGFloat(maxAlternatives + 1) * rowHeight + 35)
     }
 
-    private static func color(for percentage: Int) -> Color {
-        switch CandidateTreeScoreBand(percentage: percentage) {
-        case .high: .blue
-        case .medium: .orange
-        case .low: .red
+    private static func selectableIndex(in presentations: [CandidatePresentation], candidate: Candidate) -> Int? {
+        presentations.firstIndex {
+            $0.candidate.text == candidate.text && $0.candidate.composingCount == candidate.composingCount
         }
     }
 
@@ -250,30 +202,31 @@ struct ConversionTreeView: View {
                 span: CandidateTreeReadingSpan(start: 0, end: readingLength),
                 text: candidate.text,
                 elementIndex: nil,
-                alignmentAvailable: false
+                alignmentAvailable: false,
+                score: nil
             )]
         }
-
         let spans = CandidateTreeAnalysis.readingSpans(for: candidate)
         return candidate.data.indices.map { index in
-            ConversionTreePiece(span: spans[index], text: candidate.data[index].word, elementIndex: index, alignmentAvailable: true)
+            ConversionTreePiece(
+                span: spans[index],
+                text: candidate.data[index].word,
+                elementIndex: index,
+                alignmentAvailable: true,
+                score: Double(candidate.data[index].value())
+            )
         }
     }
 
     private static func linguisticLabels(for candidate: Candidate) -> [String?] {
-        let pieces = Self.pieces(for: candidate)
-        guard pieces.allSatisfy({ $0.elementIndex != nil }) else {
-            return pieces.map { _ in "語" }
+        guard !candidate.data.isEmpty, candidate.data.map(\.word).joined() == candidate.text else {
+            return [nil]
         }
-
-        let baseLabels = candidate.data.map { element in
-            CandidateTreeAnalysis.partOfSpeechLabel(leftID: element.lcid, rightID: element.rcid)
-        }
+        let baseLabels = candidate.data.map { CandidateTreeAnalysis.partOfSpeechLabel(leftID: $0.lcid, rightID: $0.rcid) }
         return candidate.data.indices.map { index in
             var label = baseLabels[index]
             if label == "名詞", candidate.data.indices.contains(index + 1),
-               ["は", "が"].contains(candidate.data[index + 1].word),
-               baseLabels[index + 1] == "助詞" {
+               ["は", "が"].contains(candidate.data[index + 1].word), baseLabels[index + 1] == "助詞" {
                 label += " · 主語候補"
             }
             let isLastWord = index == baseLabels.lastIndex(where: { $0 != "記号" })
@@ -281,19 +234,6 @@ struct ConversionTreeView: View {
                 label += " · 述語候補"
             }
             return label
-        }
-    }
-
-}
-
-private struct ScoreLegend: View {
-    let color: Color
-    let label: String
-
-    var body: some View {
-        HStack(spacing: 3) {
-            Circle().fill(self.color).frame(width: 6, height: 6)
-            Text(self.label).font(.system(size: 9)).foregroundStyle(.secondary)
         }
     }
 }
@@ -304,29 +244,34 @@ private struct ConversionTreeColumnView: View {
     let onSelect: (Int) -> Void
 
     var body: some View {
-        VStack(spacing: 8) {
+        let rowHeight: CGFloat = self.showLinguisticAnalysis ? 55 : 42
+        VStack(alignment: .leading, spacing: 0) {
             ConversionTreeTokenView(token: self.column.selected, selected: true, showLinguisticAnalysis: self.showLinguisticAnalysis)
-                .frame(minHeight: 68)
+                .frame(height: rowHeight, alignment: .top)
             if !self.column.alternatives.isEmpty {
-                VStack(spacing: 7) {
-                    ForEach(self.column.alternatives) { token in
-                        Button {
-                            self.onSelect(token.candidateIndex)
-                        } label: {
-                            ConversionTreeTokenView(token: token, selected: false, showLinguisticAnalysis: self.showLinguisticAnalysis)
+                HStack(alignment: .top, spacing: 3) {
+                    ConversionTreeBranch(count: self.column.alternatives.count)
+                        .stroke(Color.secondary.opacity(0.48), lineWidth: 1)
+                        .frame(width: 8, height: CGFloat(self.column.alternatives.count) * rowHeight)
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(self.column.alternatives) { token in
+                            Group {
+                                if let candidateIndex = token.candidateIndex {
+                                    Button { self.onSelect(candidateIndex) } label: {
+                                        ConversionTreeTokenView(token: token, selected: false, showLinguisticAnalysis: self.showLinguisticAnalysis)
+                                    }
+                                    .buttonStyle(.plain)
+                                } else {
+                                    ConversionTreeTokenView(token: token, selected: false, showLinguisticAnalysis: self.showLinguisticAnalysis)
+                                }
+                            }
+                            .frame(height: rowHeight, alignment: .top)
                         }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("\(token.text)、推定スコア比 \(token.percentage)%")
                     }
-                }
-                .background {
-                    ConversionTreeBranches(count: self.column.alternatives.count)
-                        .stroke(Color.secondary.opacity(0.35), lineWidth: 1)
-                        .padding(.top, -8)
                 }
             }
         }
-        .frame(width: 124, alignment: .top)
+        .fixedSize(horizontal: true, vertical: false)
     }
 }
 
@@ -335,93 +280,60 @@ private struct ConversionTreeTokenView: View {
     let selected: Bool
     let showLinguisticAnalysis: Bool
 
-    private var scoreColor: Color {
-        switch CandidateTreeScoreBand(percentage: self.token.percentage) {
-        case .high:
-            return .blue
-        case .medium:
-            return .orange
-        case .low:
-            return .red
-        }
-    }
-
-    private var primaryColor: Color {
-        self.selected ? .white : (self.token.isZenzaiCorrection ? .purple : self.scoreColor)
-    }
-
     private var tileColor: Color {
-        self.token.isZenzaiCorrection ? .purple : self.scoreColor
+        if self.token.isZenzaiCorrection { return .purple }
+        if self.token.percentage == "—" { return .gray }
+        let value = Int(self.token.percentage.replacingOccurrences(of: "%", with: "")) ?? 0
+        switch CandidateTreeScoreBand(percentage: value) {
+        case .high: return .blue
+        case .medium: return .orange
+        case .low: return .red
+        }
     }
 
     var body: some View {
-        VStack(spacing: 3) {
+        VStack(spacing: 1) {
             Text(self.token.text)
-                .font(.system(size: self.selected ? 17 : 14, weight: self.selected ? .semibold : .regular))
-                .foregroundStyle(self.primaryColor)
-                .lineLimit(2)
-                .multilineTextAlignment(.center)
+                .font(.system(size: self.selected ? 15 : 13, weight: self.selected ? .semibold : .regular))
+                .foregroundStyle(self.selected ? Color.white : (self.token.isZenzaiCorrection ? Color.purple : Color.primary))
+                .fixedSize(horizontal: true, vertical: false)
+                .lineLimit(1)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
                 .frame(maxWidth: .infinity)
-            Text("\(self.token.percentage)%")
-                .font(.system(size: 10, weight: .medium, design: .monospaced))
-                .foregroundStyle(self.primaryColor)
-            if self.showLinguisticAnalysis, let partOfSpeech = self.token.partOfSpeech {
-                Text(partOfSpeech)
-                    .font(.system(size: 9))
-                    .foregroundStyle(self.selected ? Color.white.opacity(0.84) : Color.secondary)
-            }
-            if self.token.isZenzaiCorrection {
-                Text("Zenzai")
-                    .font(.system(size: 8, weight: .medium))
-                    .foregroundStyle(self.selected ? Color.white.opacity(0.86) : Color.purple)
+                .background(self.selected ? self.tileColor : self.tileColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
+            Text(self.token.percentage)
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundStyle(Color.secondary)
+            if self.showLinguisticAnalysis, let label = self.token.partOfSpeech {
+                Text(label)
+                    .font(.system(size: 8))
+                    .foregroundStyle(Color.secondary)
             }
         }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 5)
-        .frame(minHeight: 56)
-        .background(
-            self.selected ? self.tileColor : self.tileColor.opacity(0.12),
-            in: RoundedRectangle(cornerRadius: 9)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: 9)
-                .stroke(self.tileColor.opacity(self.selected ? 1 : 0.55), lineWidth: 1)
+        .overlay(alignment: .topTrailing) {
+            if self.token.isZenzaiCorrection {
+                Text("Z").font(.system(size: 7, weight: .bold)).foregroundStyle(.white)
+                    .padding(2).background(Color.purple, in: Circle()).offset(x: 3, y: -4)
+            }
         }
         .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(self.token.text)、語ごとの推定比率 \(self.token.percentage)")
     }
 }
 
-private struct ConversionTreePathConnector: Shape {
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        path.move(to: CGPoint(x: 0, y: rect.midY + 6))
-        path.addCurve(
-            to: CGPoint(x: rect.maxX, y: rect.midY - 6),
-            control1: CGPoint(x: rect.width * 0.35, y: rect.minY),
-            control2: CGPoint(x: rect.width * 0.65, y: rect.maxY)
-        )
-        return path
-    }
-}
-
-private struct ConversionTreeBranches: Shape {
+private struct ConversionTreeBranch: Shape {
     let count: Int
 
     func path(in rect: CGRect) -> Path {
         var path = Path()
-        guard count > 0 else {
-            return path
-        }
-        let center = rect.midX
-        let targetSpacing = rect.height / CGFloat(count)
+        guard count > 0 else { return path }
         for index in 0..<count {
-            let targetY = targetSpacing * (CGFloat(index) + 0.5)
-            path.move(to: CGPoint(x: center, y: 0))
-            path.addCurve(
-                to: CGPoint(x: center, y: targetY),
-                control1: CGPoint(x: center - 12, y: targetY * 0.4),
-                control2: CGPoint(x: center + 12, y: targetY * 0.6)
-            )
+            let y = CGFloat(index) * rect.height / CGFloat(count) + 11
+            path.move(to: CGPoint(x: rect.minX, y: -16))
+            path.addCurve(to: CGPoint(x: rect.maxX, y: y),
+                          control1: CGPoint(x: rect.minX, y: y),
+                          control2: CGPoint(x: rect.midX, y: y))
         }
         return path
     }

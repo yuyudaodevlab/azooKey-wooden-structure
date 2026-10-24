@@ -130,4 +130,31 @@ public enum CandidateTreeAnalysis {
         }
         return percentages
     }
+
+    /// Formats relative estimates for comparable dictionary entries. A nil or non-finite
+    /// score is unavailable; finite entries are normalized only against the supplied set.
+    public static func estimatedPercentageLabels(scores: [Double?]) -> [String] {
+        guard !scores.isEmpty else { return [] }
+        let finiteScores = scores.compactMap { score in
+            score.flatMap { $0.isFinite ? $0 : nil }
+        }
+        guard let maxScore = finiteScores.max() else {
+            return Array(repeating: "—", count: scores.count)
+        }
+        let weights = scores.map { score -> Double in
+            guard let score, score.isFinite else { return 0 }
+            return exp(score - maxScore)
+        }
+        let total = weights.reduce(0, +)
+        guard total.isFinite, total > 0 else {
+            return Array(repeating: "—", count: scores.count)
+        }
+        return scores.indices.map { index in
+            guard scores[index]?.isFinite == true else { return "—" }
+            let percentage = weights[index] / total * 100
+            guard percentage > 0 else { return "<1%" }
+            guard percentage < 1 else { return "\(Int(percentage.rounded()))%" }
+            return "<1%"
+        }
+    }
 }
