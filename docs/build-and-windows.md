@@ -92,6 +92,17 @@ GitHub Appトークンへ切り替えてイベントを発生させる追加設�
 
 ## 検証
 
+### Windows の Swift 出力マップエラー
+
+`supplementary output file map ... is missing an entry` は、Swift driver の
+[Windowsでの同種の不具合報告](https://github.com/swiftlang/swift-driver/issues/1477)があります。
+長いコンパイラー引数が response file に渡されるケースで報告されています。
+`build-windows.ps1` では `-Xswiftc -driver-filelist-threshold -Xswiftc 0` を指定し、
+ソース・出力ファイル名を専用の一覧ファイルで渡して引数の長さを減らします。
+Release設定とモジュール全体の最適化は維持します。この回避策の成否はWindows CIで確認が必要です。
+
+### テスト手順
+
 ```sh
 cd windows/frontend
 npm ci --ignore-scripts

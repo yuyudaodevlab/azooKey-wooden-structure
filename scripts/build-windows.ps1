@@ -42,8 +42,16 @@ if (!(Test-Path $moduleMap)) { throw 'SDKROOT must point to the Swift Windows SD
 Invoke-WebRequest 'https://gist.githubusercontent.com/fkunn1326/ef8be2217082302b291f2b8d4178194a/raw/c424968c250afcd5afa1131aea1329dc0744a7f9/ucrt.modulemap' -OutFile $moduleMap
 Push-Location server-swift
 try {
-    swift build -c release
-    $swiftBin = (swift build -c release --show-bin-path | Select-Object -Last 1).Trim()
+    # Keep large source lists out of Windows response-file argument escaping.
+    # https://github.com/swiftlang/swift-driver/issues/1477
+    # Use filelists even below the driver's default threshold; preserve Release/WMO.
+    $swiftBuildArguments = @(
+        '-c', 'release',
+        '-Xswiftc', '-driver-filelist-threshold', '-Xswiftc', '0'
+    )
+    swift --version
+    swift build @swiftBuildArguments
+    $swiftBin = (swift build @swiftBuildArguments --show-bin-path | Select-Object -Last 1).Trim()
     Copy-Item (Join-Path $swiftBin 'azookey-server.lib') ../azookey-server.lib -Force
 } finally { Pop-Location }
 rustup target add i686-pc-windows-msvc
