@@ -83,7 +83,7 @@ GitHub Appトークンへ切り替えてイベントを発生させる追加設�
 リポジトリの clone / pull、または Actions の `installer-macos` / `installer-windows` artifact から取得できます。
 
 [GitHub の通常の Git ファイル上限は100 MiBです](https://docs.github.com/en/repositories/working-with-files/managing-large-files/about-large-files-on-github)。
-どちらかのインストーラーが上限を超えた場合、公開ジョブを明示的に失敗させ、コミット・PR作成を行いません。
+どちらかのインストーラーが上限を超えた場合、公開ジョブはコミット・PR作成をスキップして notice を出します。
 ビルド済みファイルは Actions artifacts に14日間残ります。モデルやGPUライブラリの同梱により
 上限を超える可能性があるため、その場合はパッケージの縮小または GitHub Releases での配布が必要です。
 

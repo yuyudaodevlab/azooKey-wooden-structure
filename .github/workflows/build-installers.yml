@@ -157,19 +157,32 @@ jobs:
           path: installer
           merge-multiple: true
       - name: Commit verified installers
+        id: commit_installers
         if: steps.published.outputs.exists != 'true'
         env:
           BUILD_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$BUILD_SHA"
+          max_git_file_size=$((100 * 1024 * 1024))
+          for extension in pkg exe; do
+            path="installer/azooKey-wooden-structure-$BUILD_SHA.$extension"
+            size=$(stat -c%s "$path")
+            if test "$size" -gt "$max_git_file_size"; then
+              echo "::notice::Skipping publish PR because $path is $size bytes, which exceeds GitHub's 100 MiB Git file limit. Download installers from Actions artifacts or publish via GitHub Releases."
+              echo 'publish=false' >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
           node scripts/installer-manifest.cjs "$BUILD_SHA"
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add "installer/azooKey-wooden-structure-$BUILD_SHA.pkg" "installer/azooKey-wooden-structure-$BUILD_SHA.exe" "installer/$BUILD_SHA.json"
           git commit -m "build: installers for $BUILD_SHA"
           git push origin "HEAD:refs/heads/build/$BUILD_SHA"
+          echo 'publish=true' >> "$GITHUB_OUTPUT"
       - name: Create PR and request human review
+        if: steps.published.outputs.exists == 'true' || steps.commit_installers.outputs.publish == 'true'
         uses: actions/github-script@v7
         with:
           script: |
