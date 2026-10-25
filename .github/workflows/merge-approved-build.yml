@@ -1,0 +1,66 @@
+name: Merge approved installer PR
+on:
+  pull_request_review:
+    types: [submitted]
+permissions:
+  contents: read
+jobs:
+  merge:
+    if: >-
+      github.event.review.state == 'approved' &&
+      github.event.review.user.login == 'yuyudaodevlab' &&
+      github.event.pull_request.base.ref == 'main' &&
+      startsWith(github.event.pull_request.head.ref, 'build/') &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      # Never execute scripts from the build PR with write permissions.
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const number = context.payload.pull_request.number;
+            const {data: pr} = await github.rest.pulls.get({...context.repo, pull_number: number});
+            const source = pr.head.ref.match(/^build\/([0-9a-f]{40})$/)?.[1];
+            if (!source || pr.state !== 'open' || pr.draft || pr.user.login !== 'github-actions[bot]') {
+              throw new Error('Not an eligible generated installer PR');
+            }
+            if (context.payload.review.commit_id !== pr.head.sha) {
+              throw new Error('Approval is for an older commit; request a fresh review');
+            }
+            const {data: commit} = await github.rest.repos.getCommit({...context.repo, ref: pr.head.sha});
+            if (commit.parents.length !== 1 || commit.parents[0].sha !== source) {
+              throw new Error('Build branch must contain exactly one artifact commit');
+            }
+            const files = await github.paginate(github.rest.pulls.listFiles, {...context.repo, pull_number: number});
+            const expected = new Set([
+              `installer/azooKey-wooden-structure-${source}.pkg`,
+              `installer/azooKey-wooden-structure-${source}.exe`,
+              `installer/${source}.json`,
+            ]);
+            if (files.length !== 3 || files.some(f => !expected.has(f.filename) || f.status !== 'added')) {
+              throw new Error('PR must only add the two installers and their manifest');
+            }
+            const reviews = await github.paginate(github.rest.pulls.listReviews, {...context.repo, pull_number: number});
+            const latest = reviews.filter(r => r.user.login === 'yuyudaodevlab' && ['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED'].includes(r.state)).at(-1);
+            if (latest?.state !== 'APPROVED' || latest.commit_id !== pr.head.sha) {
+              throw new Error('Current head is not approved by yuyudaodevlab');
+            }
+            // A ready PR can be merged immediately; otherwise wait for required checks.
+            // Both API operations honor branch protection and require this exact head.
+            if (pr.mergeable === true && pr.mergeable_state === 'clean') {
+              const {data: merged} = await github.rest.pulls.merge({
+                ...context.repo, pull_number: number, sha: pr.head.sha, merge_method: 'squash',
+              });
+              if (!merged.merged) throw new Error(merged.message);
+              core.notice(`Merged approved PR #${number}`);
+              return;
+            }
+            await github.graphql(`mutation($id: ID!, $sha: GitObjectID!) {
+              enablePullRequestAutoMerge(input: {pullRequestId: $id, expectedHeadOid: $sha, mergeMethod: SQUASH}) {
+                pullRequest { number autoMergeRequest { enabledAt } }
+              }
+            }`, {id: pr.node_id, sha: pr.head.sha});
+            core.notice(`Auto-merge enabled for approved PR #${number}`);

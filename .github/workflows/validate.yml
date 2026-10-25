@@ -1,0 +1,25 @@
+name: Validate
+on:
+  workflow_call:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+    paths-ignore: ['installer/**']
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci --ignore-scripts
+        working-directory: windows/frontend
+      - run: node --test scripts/tests/*.test.cjs
+      - run: npm run build
+        working-directory: windows/frontend

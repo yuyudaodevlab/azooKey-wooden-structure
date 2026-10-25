@@ -1,0 +1,13 @@
+target
+build
+scripts/*.exe
+logs/*
+.idea
+
+*.gguf
+*.dll
+*.lib
+server-swift/.build/
+server-swift/azooKey_dictionary_storage/
+server-swift/azooKey_emoji_dictionary_storage/
+llama_*/

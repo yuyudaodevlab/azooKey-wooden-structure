@@ -1,0 +1,164 @@
+name: Build installers
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'installer/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: installers-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      build: ${{ steps.branch.outputs.build }}
+    steps:
+      - uses: actions/github-script@v7
+        id: branch
+        with:
+          script: |
+            const ref = `heads/build/${context.sha}`;
+            try {
+              const {data} = await github.rest.git.getRef({...context.repo, ref});
+              if (data.object.sha !== context.sha) {
+                core.notice('Existing artifacts will be reused when publishing; the branch will not be overwritten.');
+              }
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              await github.rest.git.createRef({...context.repo, ref: `refs/${ref}`, sha: context.sha});
+            }
+            core.setOutput('build', 'true');
+
+  verify:
+    needs: prepare
+    uses: ./.github/workflows/validate.yml
+
+  macos:
+    needs: [prepare, verify]
+    if: needs.prepare.outputs.build == 'true'
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Select Xcode 26.1 or newer
+        shell: bash
+        run: |
+          set -euo pipefail
+          selected=$(python3 -c 'import glob,re; p=glob.glob("/Applications/Xcode_26*.app"); print(max(p,key=lambda s:tuple(map(int,re.findall(r"[0-9]+",s)))) if p else "")')
+          test -n "$selected"
+          sudo xcode-select -s "$selected/Contents/Developer"
+          xcodebuild -version
+      - name: Build macOS installer
+        env:
+          BUILD_SHA: ${{ github.sha }}
+        run: bash scripts/build-macos.sh "$BUILD_SHA"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer-macos
+          path: installer/azooKey-wooden-structure-${{ github.sha }}.pkg
+          if-no-files-found: error
+          retention-days: 14
+
+  windows:
+    needs: [prepare, verify]
+    if: needs.prepare.outputs.build == 'true'
+    runs-on: windows-2022
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: compnerd/gha-setup-swift@775d3f4111c5be58a0f62f2efdd353bb8fac15c7
+        with:
+          swift-version: swift-6.0.2-release
+          swift-build: 6.0.2-RELEASE
+      - uses: arduino/setup-protoc@v3
+        with:
+          version: '29.3'
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Prepare Rust and Inno Setup
+        shell: pwsh
+        run: |
+          rustup target add i686-pc-windows-msvc
+          if ($LASTEXITCODE -ne 0) { throw 'rustup failed' }
+          choco install innosetup --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { throw 'Inno Setup installation failed' }
+      - name: Build Windows IME installer
+        shell: pwsh
+        env:
+          BUILD_SHA: ${{ github.sha }}
+        run: ./scripts/build-windows.ps1 -Commit $env:BUILD_SHA
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer-windows
+          path: installer/azooKey-wooden-structure-${{ github.sha }}.exe
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    needs: [macos, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: build/${{ github.sha }}
+          fetch-depth: 0
+      - name: Check for already published artifacts
+        id: published
+        env:
+          BUILD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if test "$(git rev-parse HEAD)" = "$BUILD_SHA"; then
+            echo 'exists=false' >> "$GITHUB_OUTPUT"
+          else
+            test "$(git rev-parse HEAD^)" = "$BUILD_SHA"
+            git diff --name-only "$BUILD_SHA" HEAD | node -e 'const fs=require("fs"); const s=process.env.BUILD_SHA; const a=[`installer/azooKey-wooden-structure-${s}.pkg`,`installer/azooKey-wooden-structure-${s}.exe`,`installer/${s}.json`]; const n=fs.readFileSync(0,"utf8").trim().split("\n"); if(n.length!==3 || n.some(p=>!a.includes(p))) process.exit(1);'
+            node -e 'const fs=require("fs"); const s=process.env.BUILD_SHA; const m=JSON.parse(fs.readFileSync("installer/"+s+".json")); if(m.sourceCommit!==s || m.files.length!==2) process.exit(1);'
+            echo 'exists=true' >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/download-artifact@v4
+        if: steps.published.outputs.exists != 'true'
+        with:
+          pattern: installer-*
+          path: installer
+          merge-multiple: true
+      - name: Commit verified installers
+        if: steps.published.outputs.exists != 'true'
+        env:
+          BUILD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$BUILD_SHA"
+          node scripts/installer-manifest.cjs "$BUILD_SHA"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add "installer/azooKey-wooden-structure-$BUILD_SHA.pkg" "installer/azooKey-wooden-structure-$BUILD_SHA.exe" "installer/$BUILD_SHA.json"
+          git commit -m "build: installers for $BUILD_SHA"
+          git push origin "HEAD:refs/heads/build/$BUILD_SHA"
+      - name: Create PR and request human review
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const publish = require('./scripts/publish-build-pr.cjs');
+            await publish({github, context, core});

@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'">
+<style>
+:root { color-scheme: light dark; font: 14px 'Yu Gothic UI', sans-serif; }
+* { box-sizing: border-box; }
+body { margin: 0; padding: 7px; }
+main { border: 1px solid #8888; border-radius: 10px; padding: 12px; background: Canvas; color: CanvasText; height: 346px; display: flex; flex-direction: column; gap: 10px; }
+#tree { display: flex; overflow-x: auto; min-height: 102px; flex-shrink: 0; gap: 12px; }
+.column { display: flex; flex-direction: column; gap: 5px; white-space: nowrap; position: relative; }
+.column:not(:first-child)::before { content: ''; position: absolute; top: 14px; left: -12px; width: 12px; border-top: 1px solid #888; }
+strong { padding: 4px 9px; border: 1px solid #369bd1; border-radius: 5px; }
+.alternative { font-size: 12px; opacity: .8; }
+ol { margin: 0; padding: 0 0 0 28px; overflow: auto; flex: 1; }
+li { padding: 5px 8px; border-radius: 4px; overflow-wrap: anywhere; }
+li[aria-selected=true] { background: Highlight; color: HighlightText; }
+footer { font-size: 11px; opacity: .7; }
+</style>
+<script>/* TREE_SCRIPT */</script>
+</head>
+<body><main>
+<div id="tree" aria-label="変換候補ツリー"></div>
+<ol id="candidates" role="listbox" aria-label="変換候補"></ol>
+<footer>↑↓・Space：候補選択 ／ Enter：確定</footer>
+</main></body></html>
