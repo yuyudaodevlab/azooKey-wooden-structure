@@ -77,11 +77,22 @@ jobs:
     runs-on: windows-2022
     timeout-minutes: 120
     steps:
+      - name: Enable long paths before checkout
+        shell: pwsh
+        run: |
+          git config --global core.longpaths true
+          if ($LASTEXITCODE -ne 0) { throw 'Could not enable Git long paths' }
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
           path: r
+          # Exclude the tracked macOS archive in build/; cone mode keeps root files.
+          sparse-checkout: |
+            windows
+            scripts
+            .github
+          sparse-checkout-cone-mode: true
       - uses: actions/setup-node@v4
         with:
           node-version: 22
