@@ -18,9 +18,13 @@ python3 scripts/download-models.py
 
 本プロジェクトでは、以下のオープンソースソフトウェアを使用しています。
 
-### [azooKey](https://github.com/azooKey/azooKey)
+### [azooKey](https://github.com)
 - ライセンス: MIT License
 - 著作権表示: Copyright (c) 2020-2025 Keita Miwa (ensan).
+
+### [azooKey-Windows](https://github.com/fkunn1326/azooKey-Windows)
+- ライセンス: MIT License
+- 著作権表示: Copyright (c) 2024 fkunn1326.
 
 ---
 MIT License
