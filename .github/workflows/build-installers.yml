@@ -81,6 +81,7 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+          path: r
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -101,13 +102,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Inno Setup installation failed' }
       - name: Build Windows IME installer
         shell: pwsh
+        working-directory: r
         env:
           BUILD_SHA: ${{ github.sha }}
         run: ./scripts/build-windows.ps1 -Commit $env:BUILD_SHA
       - uses: actions/upload-artifact@v4
         with:
           name: installer-windows
-          path: installer/azooKey-wooden-structure-${{ github.sha }}.exe
+          path: r/installer/azooKey-wooden-structure-${{ github.sha }}.exe
           if-no-files-found: error
           retention-days: 14
 
