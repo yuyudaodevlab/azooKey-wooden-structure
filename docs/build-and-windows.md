@@ -113,3 +113,19 @@ node --test scripts/tests/*.test.cjs
 
 さらに実機またはVMで、メモ帳・ブラウザー・32 bitアプリに対する日本語入力、
 候補選択、削除、未確定文字のキャンセル、再起動後の起動、アンインストールを確認してください。
+
+### 日本語入力の起動・切り替えの回帰確認
+
+- 通常ユーザーで `Program Files` にインストールした状態から起動し、候補表示の
+  WebView2 データが `%LOCALAPPDATA%\AzooKeyWooden\WebView2` に作成されること。
+  実行ファイルの隣に保存するとアクセス拒否で候補表示プロセスが終了します。
+- サーバー起動前に IME を選択しても、半角／全角で A / あ が切り替わること。
+  サーバー起動後、入力先アプリを再起動せずに `nihongo` の入力・変換ができること。
+- 未入力時の切り替えで空の未確定文字列を作らず、変換中の切り替えでは確定して
+  英数入力へ戻ること。言語バーのクリックでも切り替えられること。
+
+クライアントの回帰テストは次で実行します（Rust / Windows SDK / protoc が必要）。
+
+```powershell
+cargo test --manifest-path windows/Cargo.toml -p azookey-windows --lib --locked
+```

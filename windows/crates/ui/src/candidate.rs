@@ -42,9 +42,11 @@ pub fn create_candidate_window(event_loop: &EventLoop<UserEvent>) -> Result<Wind
     Ok(window)
 }
 
-pub fn create_candidate_webview<'a>() -> Result<WebViewBuilder<'a>> {
-    Ok(WebViewBuilder::new().with_transparent(true).with_html(
-        include_str!("candidate.html")
-            .replace("/* TREE_SCRIPT */", include_str!("candidate-tree.js")),
-    ))
+pub fn create_candidate_webview(context: &mut wry::WebContext) -> Result<WebViewBuilder<'_>> {
+    Ok(WebViewBuilder::with_web_context(context)
+        .with_transparent(true)
+        .with_html(
+            include_str!("candidate.html")
+                .replace("/* TREE_SCRIPT */", include_str!("candidate-tree.js")),
+        ))
 }

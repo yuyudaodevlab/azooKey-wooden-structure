@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::{
-    engine::{ipc_service, state::IMEState},
+    engine::state::IMEState,
     globals::{DllModule, GUID_DISPLAY_ATTRIBUTE},
 };
 
@@ -28,19 +28,10 @@ impl ITfTextInputProcessor_Impl for TextServiceFactory_Impl {
         tracing::debug!("Activated with tid: {tid}");
 
         // add reference to the dll instance to prevent it from being unloaded
-        let mut dll_instance = DllModule::get()?;
-        dll_instance.add_ref();
+        DllModule::get()?.add_ref();
 
-        // initialize ipc_service
-        if let Ok(mut ipc_service) = ipc_service::IPCService::new() {
-            ipc_service.append_text("".to_string())?;
-            IMEState::get()?.ipc_service = Some(ipc_service);
-        } else {
-            // Activate() should not return an error
-            // if Activate() returns an error, the icon of the previously activated TextService will be displayed, which may confuse the user
-            tracing::error!("Failed to initialize IPC service");
-            return Ok(());
-        }
+        // Register TSF even while the launcher is still starting. Connect lazily
+        // when conversion is needed, so a missing pipe cannot disable key input.
 
         let mut text_service = self.borrow_mut()?;
 
@@ -111,8 +102,7 @@ impl ITfTextInputProcessor_Impl for TextServiceFactory_Impl {
         tracing::debug!("Deactivated");
 
         // remove reference to the dll instance
-        let mut dll_instance = DllModule::get()?;
-        dll_instance.release();
+        DllModule::get()?.release();
 
         {
             let text_service = self.borrow()?;

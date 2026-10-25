@@ -68,8 +68,17 @@ async fn main() -> anyhow::Result<()> {
     let task_guard: Arc<Mutex<Option<JoinHandle<()>>>> = Arc::new(Mutex::new(None));
 
     let proxy_clone = event_loop_proxy.clone();
+    // WebView2's default directory is beside ui.exe, which is read-only under
+    // Program Files for the signed-in user. Both views share a writable profile.
+    let webview_data = std::path::PathBuf::from(
+        std::env::var_os("LOCALAPPDATA").context("LOCALAPPDATA is not set")?,
+    )
+    .join("AzooKeyWooden")
+    .join("WebView2");
+    std::fs::create_dir_all(&webview_data)?;
+    let mut webview_context = wry::WebContext::new(Some(webview_data));
     let candidate_window = candidate::create_candidate_window(&event_loop)?;
-    let candidate_webview_builder = candidate::create_candidate_webview()?;
+    let candidate_webview_builder = candidate::create_candidate_webview(&mut webview_context)?;
     let candidate_webview = candidate_webview_builder
         .with_devtools(false)
         .with_ipc_handler(move |message| {
@@ -89,7 +98,8 @@ async fn main() -> anyhow::Result<()> {
         .build(&candidate_window)?;
 
     let indicator_window = indicator::create_indicator_window(&event_loop)?;
-    let indicator_webview = indicator::create_indicator_webview(&indicator_window)?;
+    let indicator_webview =
+        indicator::create_indicator_webview(&indicator_window, &mut webview_context)?;
 
     // handle window actions
     let proxy_clone = event_loop_proxy.clone();

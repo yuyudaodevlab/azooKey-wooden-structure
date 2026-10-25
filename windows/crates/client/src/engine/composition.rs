@@ -10,7 +10,7 @@ use super::{
     client_action::{ClientAction, SetSelectionType, SetTextType},
     full_width::{to_fullwidth, to_halfwidth},
     input_mode::InputMode,
-    ipc_service::Candidates,
+    ipc_service::{Candidates, IPCService},
     state::IMEState,
     text_util::{to_half_katakana, to_katakana},
     user_action::{Function, Navigation},
@@ -23,7 +23,7 @@ use windows::Win32::{
     },
 };
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 
 #[derive(Default, Clone, PartialEq, Debug)]
 pub enum CompositionState {
@@ -327,6 +327,13 @@ impl TextServiceFactory {
         actions: &[ClientAction],
         transition: CompositionState,
     ) -> Result<()> {
+        // Switching an idle IME must work without a server or an edit session.
+        if let [ClientAction::SetIMEMode(mode)] = actions {
+            if self.borrow()?.borrow_composition()?.state == CompositionState::None {
+                return self.set_input_mode(mode);
+            }
+        }
+
         #[allow(clippy::let_and_return)]
         let (composition, mode) = {
             let text_service = self.borrow()?;
@@ -342,10 +349,16 @@ impl TextServiceFactory {
         let mut corresponding_count = composition.corresponding_count.clone();
         let mut candidates = composition.candidates.clone();
         let mut selection_index = composition.selection_index;
-        let mut ipc_service = IMEState::get()?
-            .ipc_service
-            .clone()
-            .context("ipc_service is None")?;
+        let service = IMEState::get()?.ipc_service.clone();
+        let mut ipc_service = match service {
+            Some(service) => service,
+            None => {
+                let mut service = IPCService::new()?;
+                service.clear_text()?;
+                IMEState::get()?.ipc_service = Some(service.clone());
+                service
+            }
+        };
         let mut transition = transition;
 
         self.update_context(&preview)?;
@@ -429,22 +442,8 @@ impl TextServiceFactory {
                     // self.set_cursor(offset)?;
                 }
                 ClientAction::SetIMEMode(mode) => {
-                    self.start_composition()?;
-                    self.update_pos()?;
                     self.end_composition()?;
-
-                    let mut ime_state = IMEState::get()?;
-                    ime_state.input_mode = mode.clone();
-
-                    // update the language bar
-                    self.update_lang_bar()?;
-
-                    let mode = match mode {
-                        InputMode::Latin => "A",
-                        InputMode::Kana => "あ",
-                    };
-
-                    ipc_service.set_input_mode(mode)?;
+                    self.set_input_mode(mode)?;
 
                     selection_index = 0;
                     corresponding_count = 0;
@@ -541,6 +540,33 @@ impl TextServiceFactory {
         composition.suffix = suffix.clone();
         composition.corresponding_count = corresponding_count;
 
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn idle_mode_switch_does_not_require_server_or_context() -> Result<()> {
+        let factory = TextServiceFactory::default();
+        IMEState::get()?.ipc_service = None;
+        IMEState::get()?.input_mode = InputMode::Latin;
+
+        for mode in [InputMode::Kana, InputMode::Latin] {
+            factory.handle_action(
+                &[ClientAction::SetIMEMode(mode.clone())],
+                CompositionState::None,
+            )?;
+            assert_eq!(IMEState::get()?.input_mode, mode);
+            assert!(IMEState::get()?.ipc_service.is_none());
+            assert!(factory
+                .borrow()?
+                .borrow_composition()?
+                .tip_composition
+                .is_none());
+        }
         Ok(())
     }
 }
